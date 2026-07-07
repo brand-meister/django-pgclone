@@ -237,8 +237,11 @@ class S3Boto3(_Storage):
         stderr_thread.join()
 
         if process.returncode:
+            try:
+                self.s3_client.delete_object(Bucket=bucket, Key=key)
+            except Exception:
+                pass
             raise exceptions.RuntimeError("Error running command.")
-
     def run_pg_restore(self, pg_restore_cmd: str, file_path: str) -> None:
         bucket, key = _parse_s3_path(file_path)
         process = subprocess.Popen(
@@ -311,5 +314,7 @@ def client(storage_location: str) -> _Storage:
         if backend == S3_BACKEND_BOTO3:
             return S3Boto3(storage_location)
         return S3Awscli(storage_location)
+    else:
+        return Local(storage_location)
     else:
         return Local(storage_location)
