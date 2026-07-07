@@ -53,13 +53,12 @@ def _dump(
     # Note - do note format {db_dump_url} with an `f` string.
     # It will be formatted later when running the command.
     pg_dump_cmd_fmt = "pg_dump -Fc --no-acl --no-owner {db_dump_url} " + exclude_args
-    pg_dump_cmd_fmt += " " + storage_client.pg_dump(file_path)
 
     anon_pg_dump_cmd = pg_dump_cmd_fmt.format(db_dump_url="<DB_URL>")
     logging.success_msg(f"Creating DB copy with cmd: {anon_pg_dump_cmd}")
 
     pg_dump_cmd = pg_dump_cmd_fmt.format(db_dump_url=db.url(dump_db))
-    run.shell(pg_dump_cmd, env=storage_client.env, pipefail=True)
+    storage_client.run_pg_dump(pg_dump_cmd, file_path)
 
     logging.success_msg(f'Database "{database}" successfully dumped to "{dump_key}"')
 
