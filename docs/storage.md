@@ -14,6 +14,10 @@ Install the [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-s
 
 This is the default backend and requires no additional configuration.
 
+!!! warning
+
+    Installing the AWS CLI with pip can cause dependency issues in projects that depend on later versions of colorama or docutils. It is recommended to manually install the CLI using the [installation instructions](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) if the pip version doesn't work.
+
 ### boto3 (alternative)
 
 Install the optional S3 extra:
@@ -21,10 +25,6 @@ Install the optional S3 extra:
     pip install django-pgclone[s3]
 
 This installs `boto3`. No external binaries are required. Set `settings.PGCLONE_S3_BACKEND = "boto3"` to use it.
-
-!!! warning
-
-    Installing the AWS CLI with pip can cause dependency issues in projects that depend on later versions of colorama or docutils. It is recommended to manually install the CLI using the [installation instructions](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) if the pip version doesn't work.
 
 ## Configuring the S3 backend
 
