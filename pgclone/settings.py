@@ -26,6 +26,18 @@ def s3_endpoint_url() -> str | None:
     return getattr(settings, "PGCLONE_S3_ENDPOINT_URL", None)
 
 
+def s3_backend() -> str:
+    backend = getattr(settings, "PGCLONE_S3_BACKEND", None)
+    if backend is not None:
+        if backend not in ("boto3", "awscli"):
+            raise exceptions.RuntimeError(
+                'Invalid PGCLONE_S3_BACKEND setting. Must be "boto3" or "awscli".'
+            )
+        return backend
+
+    return "awscli"
+
+
 def storage_location() -> str:
     location = getattr(settings, "PGCLONE_STORAGE_LOCATION", ".pgclone")
     if not location.endswith("/"):  # pragma: no cover
