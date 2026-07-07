@@ -8,7 +8,19 @@ S3 storage is enabled by configuring a path that starts with `s3://`. A bucket a
 
 When using S3, dumps and restores are streamed, reducing the memory consumption required for large databases.
 
-In order to use the S3 storage backend, one must additionally install the [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html). Earlier versions of the CLI can be installed with `pip install awscli`.
+### AWS CLI (default)
+
+Install the [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html). Earlier versions of the CLI can be installed with `pip install awscli`.
+
+This is the default backend and requires no additional configuration.
+
+### boto3 (alternative)
+
+Install the optional S3 extra:
+
+    pip install django-pgclone[s3]
+
+This installs `boto3`. No external binaries are required. Set `settings.PGCLONE_S3_BACKEND = "boto3"` to use it.
 
 !!! warning
 
@@ -16,7 +28,7 @@ In order to use the S3 storage backend, one must additionally install the [AWS C
 
 ## Configuring the S3 backend
 
-The AWS CLI can be configured by environment variables. Inject custom environment variables by configuring `settings.PGCLONE_S3_CONFIG`. Here we override the AWS credentials and region:
+S3 credentials and region can be configured with `settings.PGCLONE_S3_CONFIG`. Here we override the AWS credentials and region:
 
 ```python
 
@@ -29,10 +41,20 @@ PGCLONE_S3_CONFIG = {
 }
 ```
 
-See [this guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html) for all environment variables that can be used with the AWS CLI.
+When using the boto3 backend, unset keys fall through to boto3's default credential chain (environment variables, IAM roles, profiles, etc.). When using the AWS CLI backend, these values are passed as environment variables to the `aws` subprocess.
 
-If using a non-standard AWS endpoint url or a non-AWS S3 provider, the endpoint url must be specified. Unfortunately, AWS CLI does not provide an environmental variable for this purpose. Instead, use the `settings.PGCLONE_S3_ENDPOINT_URL` setting, which will override the AWS CLI commands with the `--endpoint-url` option. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` must still be specified in `settings.PGCLONE_S3_CONFIG`.
+See [this guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html) for all environment variables that can be used with S3.
+
+If using a non-standard AWS endpoint url or a non-AWS S3 provider, the endpoint url must be specified with `settings.PGCLONE_S3_ENDPOINT_URL`. `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` must still be specified in `settings.PGCLONE_S3_CONFIG` when not using IAM roles or other automatic credential providers.
 
 ```python
 PGCLONE_S3_ENDPOINT_URL = "https://endpoint.example.com"
+```
+
+## S3 backend selection
+
+By default, `django-pgclone` uses the AWS CLI backend. Override this behavior with `settings.PGCLONE_S3_BACKEND`:
+
+```python
+PGCLONE_S3_BACKEND = "boto3"  # or "awscli"
 ```

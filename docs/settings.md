@@ -80,7 +80,7 @@ The hooks to run by default for restores before swapping happens.
 
 ## PGCLONE_S3_CONFIG
 
-The environment variable overrides when using the AWS CLI. Only applicable when using the S3 storage backend.
+The AWS credentials and region configuration for the S3 storage backend. Applies to both the boto3 and AWS CLI backends.
 
 For example:
 
@@ -94,6 +94,20 @@ PGCLONE_S3_CONFIG = {
 ```
 
 **Default**: `{}`
+
+## PGCLONE_S3_BACKEND
+
+The S3 backend to use. Must be `"boto3"` or `"awscli"`.
+
+When unset, the AWS CLI backend is used.
+
+For example:
+
+```python
+PGCLONE_S3_BACKEND = "boto3"
+```
+
+**Default**: `"awscli"`
 
 ## PGCLONE_S3_ENDPOINT_URL
 
