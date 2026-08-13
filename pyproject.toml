@@ -56,6 +56,10 @@ documentation = "https://django-pgclone.readthedocs.io"
 [tool.poetry.dependencies]
 python = ">=3.10.0,<4"
 django = ">=4.2"
+boto3 = { version = ">=1.26", optional = true }
+
+[tool.poetry.extras]
+s3 = ["boto3"]
 
 [tool.poetry.dev-dependencies]
 pytest = "9.0.1"
@@ -81,6 +85,9 @@ dj-database-url = "3.0.1"
 psycopg2-binary = "2.9.11"
 pytest-django = "4.11.1"
 django-dynamic-fixture = "4.0.1"
+
+[tool.poetry.group.dev.dependencies]
+boto3 = ">=1.26"
 
 [tool.pytest.ini_options]
 xfail_strict = true

@@ -110,13 +110,12 @@ def _remote_restore(
 
     logging.success_msg(f'Running pg_restore on "{dump_key}"')
     pg_restore_cmd = f"pg_restore --verbose --no-acl --no-owner -d {db.url(temp_db)}"
-    pg_restore_cmd = storage_client.pg_restore(file_path) + " " + pg_restore_cmd
 
     # When restoring, we need to ignore errors because there are certain
     # errors we cannot get around when pg restoring some DBs (like Aurora).
     # In the future, we may parse the output of the pg_restore command to see
     # if an unexpected error happened.
-    run.shell(pg_restore_cmd, env=storage_client.env, ignore_errors=True)
+    storage_client.run_pg_restore(pg_restore_cmd, file_path)
 
     return dump_key
 
