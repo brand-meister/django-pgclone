@@ -255,6 +255,37 @@ def test_s3_boto3_run_pg_dump_process_failure(mocker, boto3_client):
         s3.run_pg_dump("pg_dump cmd", "s3://bucket/key.dump")
 
 
+def _mock_s3_object(boto3_client, payload: bytes) -> None:
+    boto3_client.head_object.return_value = {"ContentLength": len(payload)}
+    body = mock.Mock()
+    body.read.return_value = payload
+    boto3_client.get_object.return_value = {"Body": body}
+
+
+def test_stream_s3_object_to_fileobj_uses_sequential_ranges(mocker, boto3_client):
+    mocker.patch("pgclone.storage._STREAM_CHUNK_SIZE", 4)
+    boto3_client.head_object.return_value = {"ContentLength": 10}
+    chunks = {("bytes=0-3",): b"0123", ("bytes=4-7",): b"4567", ("bytes=8-9",): b"89"}
+
+    def get_object(**kwargs):
+        body = mock.Mock()
+        body.read.return_value = chunks[(kwargs["Range"],)]
+        return {"Body": body}
+
+    boto3_client.get_object.side_effect = get_object
+    dest = io.BytesIO()
+
+    storage.S3Boto3("s3://bucket/")._stream_s3_object_to_fileobj("bucket", "key.dump", dest)
+
+    assert dest.getvalue() == b"0123456789"
+    assert [call.kwargs["Range"] for call in boto3_client.get_object.call_args_list] == [
+        "bytes=0-3",
+        "bytes=4-7",
+        "bytes=8-9",
+    ]
+    boto3_client.download_fileobj.assert_not_called()
+
+
 def test_s3_boto3_run_pg_restore_success(mocker, boto3_client):
     process = mock.Mock()
     process.stdin = mock.Mock()
@@ -262,11 +293,16 @@ def test_s3_boto3_run_pg_restore_success(mocker, boto3_client):
     process.returncode = 0
     process.wait.return_value = 0
     mocker.patch("pgclone.storage.subprocess.Popen", return_value=process)
+    _mock_s3_object(boto3_client, b"dump-data")
 
     s3 = storage.S3Boto3("s3://bucket/")
     s3.run_pg_restore("pg_restore cmd", "s3://bucket/key.dump")
 
-    boto3_client.download_fileobj.assert_called_once_with("bucket", "key.dump", process.stdin)
+    process.stdin.write.assert_called_once_with(b"dump-data")
+    boto3_client.get_object.assert_called_once_with(
+        Bucket="bucket", Key="key.dump", Range="bytes=0-8"
+    )
+    boto3_client.download_fileobj.assert_not_called()
 
 
 def test_s3_boto3_run_pg_restore_download_failure(mocker, boto3_client):
@@ -274,13 +310,31 @@ def test_s3_boto3_run_pg_restore_download_failure(mocker, boto3_client):
     process.stdin = mock.Mock()
     process.stdout = io.BytesIO(b"")
     mocker.patch("pgclone.storage.subprocess.Popen", return_value=process)
-    boto3_client.download_fileobj.side_effect = Exception("download failed")
+    boto3_client.head_object.side_effect = Exception("download failed")
 
     s3 = storage.S3Boto3("s3://bucket/")
     with pytest.raises(exceptions.RuntimeError, match="Error downloading dump from S3"):
         s3.run_pg_restore("pg_restore cmd", "s3://bucket/key.dump")
 
     process.kill.assert_called_once()
+
+
+def test_s3_boto3_run_pg_restore_broken_pipe(mocker, boto3_client):
+    process = mock.Mock()
+    process.stdin = mock.Mock()
+    process.stdin.write.side_effect = BrokenPipeError()
+    process.stdout = io.BytesIO(b"pg_restore warning\n")
+    process.wait.return_value = 1
+    mocker.patch("pgclone.storage.subprocess.Popen", return_value=process)
+    _mock_s3_object(boto3_client, b"dump-data")
+    logger = mocker.patch("pgclone.storage.logging.get_logger", autospec=True)
+
+    s3 = storage.S3Boto3("s3://bucket/")
+    s3.run_pg_restore("pg_restore cmd", "s3://bucket/key.dump")
+
+    process.kill.assert_not_called()
+    process.wait.assert_called()
+    logger.return_value.info.assert_called_with("pg_restore warning")
 
 
 def test_s3_boto3_run_pg_restore_ignores_pg_restore_errors(mocker, boto3_client):
@@ -290,6 +344,7 @@ def test_s3_boto3_run_pg_restore_ignores_pg_restore_errors(mocker, boto3_client)
     process.returncode = 1
     process.wait.return_value = 1
     mocker.patch("pgclone.storage.subprocess.Popen", return_value=process)
+    _mock_s3_object(boto3_client, b"dump-data")
 
     s3 = storage.S3Boto3("s3://bucket/")
     s3.run_pg_restore("pg_restore cmd", "s3://bucket/key.dump")

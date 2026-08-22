@@ -13,6 +13,12 @@ from pgclone import exceptions, logging, run, settings
 S3_BACKEND_BOTO3 = "boto3"
 S3_BACKEND_AWSCLI = "awscli"
 
+# Sequential Range size for boto3 restore. Small enough to keep memory bounded,
+# large enough to finish each HTTP GET before writing to pg_restore's stdin.
+# Do not use boto3 download_fileobj here: its multipart transfer manager
+# deadlocks when the destination is a pipe that backs up during a large COPY.
+STREAM_CHUNK_SIZE = 8 * 1024 * 1024
+
 
 def _is_boto3_importable() -> bool:
     return importlib.util.find_spec("boto3") is not None
@@ -251,6 +257,7 @@ class S3Boto3(_Storage):
             stdin=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdout=subprocess.PIPE,
+            bufsize=0,
         )
         if process.stdin is None or process.stdout is None:
             raise AssertionError
@@ -263,7 +270,13 @@ class S3Boto3(_Storage):
         output_thread.start()
 
         try:
-            self.s3_client.download_fileobj(bucket, key, process.stdin)
+            self._stream_s3_object_to_fileobj(bucket, key, process.stdin)
+        except BrokenPipeError:
+            # pg_restore exited early while data was still being written. Match the
+            # shell backends, which run restores with ignore_errors=True.
+            process.wait()
+            output_thread.join()
+            return
         except Exception as exc:
             process.kill()
             process.wait()
@@ -274,6 +287,32 @@ class S3Boto3(_Storage):
 
         process.wait()
         output_thread.join()
+
+    def _stream_s3_object_to_fileobj(self, bucket: str, key: str, fileobj: Any) -> None:
+        """Stream an S3 object to a (possibly blocking) file object.
+
+        Each Range GET is fully read into memory, then written. That way a slow
+        ``pg_restore`` COPY only blocks ``write()`` and never leaves an HTTP
+        read hanging until botocore's 60s timeout, and never uses s3transfer's
+        threaded multipart writer.
+        """
+        head = self.s3_client.head_object(Bucket=bucket, Key=key)
+        total = int(head["ContentLength"])
+        offset = 0
+        while offset < total:
+            end = min(offset + STREAM_CHUNK_SIZE, total) - 1
+            response = self.s3_client.get_object(
+                Bucket=bucket, Key=key, Range=f"bytes={offset}-{end}"
+            )
+            body = response["Body"]
+            try:
+                data = body.read()
+            finally:
+                body.close()
+            if not data:
+                raise exceptions.RuntimeError("S3 stream ended before the object was fully read.")
+            fileobj.write(data)
+            offset += len(data)
 
     def ls(self, prefix: str | None = None) -> list[str]:
         bucket, base_prefix = _parse_s3_path(self.storage_location)
