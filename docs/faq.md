@@ -12,6 +12,12 @@ If storage or lengthier restore times are not a concern, you can also configure 
 
 All core commands (`dump`, `restore`, and `copy`) have associated `PGCLONE_ALLOW_*` options. In a production environment, setting `settings.PGCLONE_ALLOW_RESTORE` and `settings.PGCLONE_ALLOW_COPY` to `False` are good ideas. If you have sensitive data that should not be dumped to outside storage, set `settings.PGCLONE_ALLOW_DUMP` to `False`.
 
+## Restore swap fails with “permission denied to terminate process”
+
+`pgclone restore` tries to disconnect sessions before renaming the temp database into place. A non-superuser cannot stop autovacuum workers or sessions owned by another role, and terminating every backend aborts the swap.
+
+pgclone only terminates backends owned by the current role and retries DROP/RENAME until leftover workers finish. Keep other clients off the target database during the swap.
+
 ## `pg_restore` shows errors but succeeded. What happened?
 
 When running `python manage.py pgclone restore`, you may see some error output from `pg_restore`. Some errors are legitimate and affect the database from being restored, while others may be benign. For example, RDS restores often report errors that are meaningless and simply cannot be suppressed.
