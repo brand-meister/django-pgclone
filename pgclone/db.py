@@ -6,6 +6,7 @@ import functools
 import shlex
 import tempfile
 import textwrap
+import time
 import urllib.parse
 from collections.abc import Generator
 from typing import Any
@@ -133,29 +134,33 @@ def _fmt_psql_sql(sql: str) -> str:
     return sql
 
 
+# DROP/RENAME needs exclusive access. Autovacuum on a large restore can
+# linger, and Postgres will not let a non-superuser signal those workers, so retry.
+_EXCLUSIVE_ACCESS_RETRIES = 15
+_EXCLUSIVE_ACCESS_DELAY_SECONDS = 2
+
+
+def _kill_connections_sql(db_name: str) -> str:
+    """Terminate backends the current role is allowed to signal.
+
+    A non-superuser cannot stop autovacuum workers or another role's sessions.
+    Targeting every pid aborts the swap.
+    """
+    return f"""
+        SELECT pg_terminate_backend(pid)
+        FROM pg_stat_activity
+        WHERE datname = '{db_name}'
+          AND pid <> pg_backend_pid()
+          AND usename = CURRENT_USER
+    """
+
+
 def _kill_connections(database: dict[str, Any], *, using: str) -> None:
-    kill_connections_sql = f"""
-        SELECT pg_terminate_backend(pg_stat_activity.pid) FROM pg_stat_activity
-            WHERE pg_stat_activity.datname = '{database["NAME"]}' AND pid <> pg_backend_pid()
-    """
-    psql(kill_connections_sql, using=using)
+    # Best-effort: leftover autovacuum / superuser sessions must not fail the command.
+    psql(_kill_connections_sql(database["NAME"]), using=using, ignore_errors=True)
 
 
-def psql(
-    sql: str,
-    *,
-    using: str,
-    ignore_errors: bool = False,
-    kill_connections: dict[str, Any] | None = None,
-):
-    """Runs psql -f with properly formatted SQL.
-
-    Ensures PGCLONE_STATEMENT_TIMEOUT and PGCLONE_LOCK_TIMEOUT are set
-    if those parameters are defined.
-    """
-    if kill_connections:
-        _kill_connections(kill_connections, using=using)
-
+def _exec_psql(sql: str, *, using: str, ignore_errors: bool = False):
     db_url = url(conn(using=using))
     sql = _fmt_psql_sql(sql)
 
@@ -173,7 +178,52 @@ def psql(
         )
 
 
+def psql(
+    sql: str,
+    *,
+    using: str,
+    ignore_errors: bool = False,
+    kill_connections: dict[str, Any] | None = None,
+    retries: int | None = None,
+):
+    """Runs psql -f with properly formatted SQL.
+
+    Ensures PGCLONE_STATEMENT_TIMEOUT and PGCLONE_LOCK_TIMEOUT are set
+    if those parameters are defined.
+
+    When ``kill_connections`` is set, the command is retried so DROP/RENAME
+    can wait out autovacuum workers the current role cannot signal.
+    """
+    if retries is None:
+        retries = _EXCLUSIVE_ACCESS_RETRIES if kill_connections and not ignore_errors else 1
+
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        if kill_connections:
+            _kill_connections(kill_connections, using=using)
+        try:
+            return _exec_psql(sql, using=using, ignore_errors=ignore_errors)
+        except exceptions.RuntimeError as exc:
+            last_error = exc
+            if attempt + 1 >= retries:
+                raise
+            time.sleep(_EXCLUSIVE_ACCESS_DELAY_SECONDS)
+    raise last_error  # pragma: no cover
+
+
+def disable_autovacuum(database: dict[str, Any], *, using: str) -> None:
+    """Keep autovacuum off so swap/rename is not blocked by workers.
+
+    Stock Postgres rejects this: ``autovacuum`` is sighup-only. A rejected
+    attempt must not abort the restore.
+    """
+    psql(
+        f'ALTER DATABASE "{database["NAME"]}" SET autovacuum = off',
+        using=using,
+        ignore_errors=True,
+    )
+
+
 def drop(database: dict[str, Any], *, using: str) -> None:
-    _kill_connections(database, using=using)
     drop_sql = f'DROP DATABASE IF EXISTS "{database["NAME"]}"'
-    psql(drop_sql, using=using)
+    psql(drop_sql, using=using, kill_connections=database)

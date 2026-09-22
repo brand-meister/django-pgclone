@@ -263,7 +263,7 @@ def _mock_s3_object(boto3_client, payload: bytes) -> None:
 
 
 def test_stream_s3_object_to_fileobj_uses_sequential_ranges(mocker, boto3_client):
-    mocker.patch("pgclone.storage._STREAM_CHUNK_SIZE", 4)
+    mocker.patch("pgclone.storage.STREAM_CHUNK_SIZE", 4)
     boto3_client.head_object.return_value = {"ContentLength": 10}
     chunks = {("bytes=0-3",): b"0123", ("bytes=4-7",): b"4567", ("bytes=8-9",): b"89"}
 
